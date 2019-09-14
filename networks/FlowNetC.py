@@ -71,7 +71,6 @@ class FlowNetC(nn.Module):
     def forward(self, x):
         x1 = x[:,0:3,:,:]
         x2 = x[:,3::,:,:]
-        print(x1.size(), x2.size())
 
         out_conv1a = self.conv1(x1)
         out_conv2a = self.conv2(out_conv1a)
@@ -110,7 +109,6 @@ class FlowNetC(nn.Module):
         flow5_up    = self.upsampled_flow5_to_4(flow5)
         out_deconv4 = self.deconv4(concat5)
 
-        print(flow5.size(), flow5_up.size(), out_deconv4.size())
         concat4 = torch.cat((out_conv4,out_deconv4,flow5_up),1)
 
         flow4       = self.predict_flow4(concat4)

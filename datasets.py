@@ -182,8 +182,13 @@ class Kinetics(data.Dataset):
         if img2 is None:
             img2 = np.zeros_like(img1)
 
-        if ((img1.shape[0] < 192) or (img1.shape[1] < 192)):
-            scale = 192 / min(img1.shape[0], img1.shape[1])
+        if (img1.shape[0] < self.render_size[0]):
+            scale = self.render_size[0] / img1.shape[0]
+            img1 = cv2.resize(img1, None, fx = scale, fy = scale)
+            img2 = cv2.resize(img2, None, fx = scale, fy = scale)
+
+        if (img1.shape[1] < self.render_size[1]):
+            scale = self.render_size[1] / img1.shape[1]
             img1 = cv2.resize(img1, None, fx = scale, fy = scale)
             img2 = cv2.resize(img2, None, fx = scale, fy = scale)
 
