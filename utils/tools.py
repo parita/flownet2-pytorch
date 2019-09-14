@@ -20,8 +20,16 @@ def module_to_dict(module, exclude=[]):
                      if isclass(getattr(module, x))
                      and x not in exclude
                      and getattr(module, x) not in exclude])
+def find_le(a, x):
+    from bisect import bisect_right
 
-class TimerBlock: 
+    # Find rightmost value less than or equal to x
+    i = bisect_right(a, x)
+    if i:
+        return i-1
+    raise ValueError
+
+class TimerBlock:
     def __init__(self, title):
         print(("{}".format(title)))
 

@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 
 TAG_CHAR = np.array([202021.25], np.float32)
 
@@ -53,3 +54,29 @@ def writeFlow(filename,uv,v=None):
     tmp[:,np.arange(width)*2 + 1] = v
     tmp.astype(np.float32).tofile(f)
     f.close()
+
+def writeFlowRGB(filename,uv,v=None):
+    """ Write optical flow to file.
+
+    If v is None, uv is assumed to contain both u and v channels,
+    stacked in depth.
+    Original code by Deqing Sun, adapted from Daniel Scharstein.
+    """
+    nBands = 2
+
+    if v is None:
+        assert(uv.ndim == 3)
+        assert(uv.shape[2] == 2)
+        u = uv[:,:,0]
+        v = uv[:,:,1]
+    else:
+        u = uv
+
+    mag, ang = cv2.cartToPolar(u, v)
+    hsv = np.zeros((u.shape[0], u.shape[1], 3))
+    hsv[:, :, 1] = 255
+    hsv[:, :, 0] = ang * 180 / np.pi / 2
+    hsv[:, :, 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
+    bgr = cv2.cvtColor(np.uint8(hsv), cv2.COLOR_HSV2BGR)
+
+    cv2.imwrite(filename, bgr)
