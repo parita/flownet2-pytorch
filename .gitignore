@@ -5,3 +5,10 @@ _ext
 work
 work/*
 _ext/
+
+.DS_Store
+._.DS_Store
+
+preprocessed/
+saved_models/
+tvqa-flow/

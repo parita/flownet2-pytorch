@@ -1,0 +1,12 @@
+CUDA_VISIBLE_DEVICES=7 python main.py \
+  --number_gpus 1 \
+  --model FlowNet2 \
+  --resume saved_models/FlowNet2_checkpoint.pth.tar \
+  --name tvqa-flow \
+  --save ./tvqa-flow  \
+  --skip_training \
+  --inference \
+  --inference_batch_size 1 \
+  --inference_dataset TVQA \
+  --inference_dataset_root /proj/vondrick/datasets/TVQA/videos/frames_hq \
+  --save_flow

@@ -38,6 +38,17 @@ def is_image_file(filename):
     """
     return has_file_allowed_extension(filename, IMG_EXTENSIONS)
 
+def list_directories(root, full_path = False):
+    if full_path:
+        return [join(root, d) for d in os.listdir(root) if exists(join(root, d))]
+    else:
+        return [d for d in os.listdir(root) if exists(join(root, d))]
+
+def list_images(root, full_path = True):
+    if full_path:
+        return [join(root, i) for i in os.listdir(root) if exists(join(root, i))]
+    else:
+        return [i for i in os.listdir(root) if is_image_file(join(root, i))]
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
 VIDEO_EXTENSION = ['.mp4', '.mov']
@@ -58,6 +69,133 @@ class StaticCenterCrop(object):
         self.h, self.w = image_size
     def __call__(self, img):
         return img[(self.h-self.th)//2:(self.h+self.th)//2, (self.w-self.tw)//2:(self.w+self.tw)//2,:]
+
+class TVQA(data.Dataset):
+    def __init__(self, args, is_cropped = False, root = '', dstype = '', replicates = 1):
+        self.args = args
+        self.is_cropped = is_cropped
+        self.crop_size = args.crop_size
+        self.render_size = args.inference_size
+        self.replicates = replicates
+
+        self.loc = join('./preprocessed/lists', 'tvqa')
+        if not isdir(self.loc):
+            os.makedirs(self.loc)
+
+        self.root = root
+
+        self.make_dataset()
+        self._integrate_lengths()
+
+    def make_dataset(self):
+        video_file = join(self.loc, 'video_list.npy')
+        video_len_file = join(self.loc, 'video_lengths.npy')
+        video_image_file = join(self.loc, 'image_list.npy')
+
+        if exists(video_file):
+            self.video_list = np.load(video_file, allow_pickle = True)
+            self.video_lengths = np.load(video_len_file, allow_pickle = True)
+            self.image_list = np.load(video_image_file, allow_pickle = True)
+            return
+
+        self.video_list = []
+        self.video_lengths = []
+        self.image_list = []
+        tvshows = list_directories(self.root, full_path = True)
+        for show in tqdm(tvshows):
+            clips = list_directories(show, full_path = True)
+            for clip in clips:
+                self.video_list.append(clip)
+                image_list = list_images(join(self.root, show, clip), full_path = True)
+                image_list = sorted(image_list)
+                self.image_list.append(image_list)
+                self.video_lengths.append(len(image_list))
+
+        np.save(video_file, self.video_list)
+        np.save(video_len_file, self.video_lengths)
+        np.save(video_image_file, self.image_list)
+
+    def _integrate_lengths(self):
+        # Save video_lengths as an integral array for faster lookups
+        total = 0
+        for idx in range(len(self.video_lengths)):
+            total += self.video_lengths[idx] - 1
+            self.video_lengths[idx] = total
+
+    def __len__(self):
+        return self.video_lengths[-1]
+
+    def _find_index(self, index):
+        if index >= self.video_lengths[0]:
+            video_idx = find_le(self.video_lengths, index)
+            image_idx = index - self.video_lengths[video_idx]
+            video_idx += 1
+        else:
+            video_idx = 0
+            image_idx = index
+
+        return video_idx, image_idx
+
+    def __getitem__(self, index):
+        video_idx, image_idx = self._find_index(index)
+        video_path = self.video_list[video_idx]
+
+        img1 = cv2.imread(self.image_list[video_idx][image_idx])
+        img2 = cv2.imread(self.image_list[video_idx][image_idx + 1])
+
+        if img1 is None:
+            np.zeros((240, 360, 3))
+
+        if img2 is None:
+            img2 = np.zeros_like(img1)
+
+        if (img1.shape[0] < self.render_size[0]):
+            scale = self.render_size[0] / img1.shape[0]
+            img1 = cv2.resize(img1, None, fx = scale, fy = scale)
+            img2 = cv2.resize(img2, None, fx = scale, fy = scale)
+
+        if (img1.shape[1] < self.render_size[1]):
+            scale = self.render_size[1] / img1.shape[1]
+            img1 = cv2.resize(img1, None, fx = scale, fy = scale)
+            img2 = cv2.resize(img2, None, fx = scale, fy = scale)
+
+        self.frame_size = img1.shape
+        image_size = img1.shape[:2]
+
+        if (self.render_size[0] < 0) or (self.render_size[1] < 0) \
+           or (self.render_size[0] % 64) or (self.render_size[1] % 64):
+            self.render_size[0] = ( (self.frame_size[0]) // 64) * 64
+            self.render_size[1] = ( (self.frame_size[1]) // 64) * 64
+
+        self.args.inference_size = self.render_size
+
+        images = [img1, img2]
+        flow = np.zeros((img1.shape[0], img1.shape[1], 2))
+
+        if self.is_cropped:
+            cropper = StaticRandomCrom(image_size, self.crop_size)
+        else:
+            cropper = StaticCenterCrop(image_size, self.render_size)
+
+        images = list(map(cropper, images))
+        flow = cropper(flow)
+
+        images = np.array(images).transpose(3, 0, 1, 2)
+        flow = flow.transpose(2, 0, 1)
+
+        images = torch.from_numpy(images.astype(np.float32))
+        flow = torch.from_numpy(flow.astype(np.float32))
+
+        pre_path, post_path = video_path.split('frames_hq/')
+        post_path = os.path.splitext(post_path)[0]
+        out_video_path = join(pre_path, 'flow', post_path)
+        if not os.path.exists(out_video_path):
+            os.makedirs(out_video_path)
+
+        flo_filename = join(out_video_path, "{:05d}.flo".format(image_idx))
+        flo_rgb_filename = join(out_video_path, "{:05d}.jpg".format(image_idx))
+        return [images], [flow], [flo_filename], [flo_rgb_filename]
+
 
 class Kinetics(data.Dataset):
     def __init__(self, args, is_cropped = False, root = '', dstype = '', replicates = 1):
@@ -219,12 +357,10 @@ class Kinetics(data.Dataset):
         images = torch.from_numpy(images.astype(np.float32))
         flow = torch.from_numpy(flow.astype(np.float32))
 
-        if not exists(video_path):
-            os.makedir(video_path)
-
         pre_path, post_path = video_path.split('train/')
+        post_path = os.path.splitext(post_path)[0]
         out_video_path = join(pre_path, 'flow', post_path)
-        if not exists(out_video_path):
+        if not os.path.exists(out_video_path):
             os.makedirs(out_video_path)
 
         flo_filename = join(out_video_path, "{:06d}.flo".format(image_idx))
